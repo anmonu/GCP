@@ -3,9 +3,11 @@ package com.anmonu.gcpobservability.monitoringadmin.controller;
 import com.anmonu.gcpobservability.monitoringadmin.dto.AlertPolicyRequest;
 import com.anmonu.gcpobservability.monitoringadmin.dto.AlertPolicyResponse;
 import com.anmonu.gcpobservability.monitoringadmin.dto.ChannelUpdateRequest;
+import com.anmonu.gcpobservability.monitoringadmin.dto.CopyAlertRequest;
 import com.anmonu.gcpobservability.monitoringadmin.dto.EmailChannelRequest;
 import com.anmonu.gcpobservability.monitoringadmin.dto.NotificationChannelResponse;
 import com.anmonu.gcpobservability.monitoringadmin.dto.PubsubChannelRequest;
+import com.anmonu.gcpobservability.monitoringadmin.dto.RenameAlertRequest;
 import com.anmonu.gcpobservability.monitoringadmin.service.MonitoringAdminService;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -40,6 +42,16 @@ public class MonitoringAdminController {
     @PutMapping("/alerts/{id}")
     public AlertPolicyResponse updateAlert(@PathVariable String id, @Valid @RequestBody AlertPolicyRequest request) {
         return service.updateAlertPolicy(id, request);
+    }
+
+    @PostMapping("/alerts/{id}/copy")
+    public AlertPolicyResponse copyAlert(@PathVariable String id, @Valid @RequestBody CopyAlertRequest request) {
+        return service.copyAlertPolicy(id, request);
+    }
+
+    @PostMapping("/alerts/{id}/rename")
+    public AlertPolicyResponse renameAlert(@PathVariable String id, @Valid @RequestBody RenameAlertRequest request) {
+        return service.renameAlertPolicy(id, request);
     }
 
     @GetMapping("/channels")

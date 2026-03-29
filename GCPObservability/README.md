@@ -122,6 +122,8 @@ APIs:
 - `GET /api/alerts`
 - `POST /api/alerts`
 - `PUT /api/alerts/{id}`
+- `POST /api/alerts/{id}/copy`
+- `POST /api/alerts/{id}/rename`
 - `GET /api/channels`
 - `POST /api/channels/email`
 - `POST /api/channels/pubsub`
@@ -324,6 +326,52 @@ curl -X POST "$ADMIN_URL/api/channels/pubsub" \
     "topicName": "projects/<PROJECT_ID>/topics/monitoring-alert-events",
     "enabled": true
   }'
+```
+
+Copy an existing alert policy to a new one:
+
+```bash
+curl -X POST "$ADMIN_URL/api/alerts/<ALERT_POLICY_ID>/copy" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "displayName": "copied-alert-policy",
+    "enabled": true,
+    "documentation": "Copied from baseline policy"
+  }'
+```
+
+Rename an alert policy:
+
+```bash
+curl -X POST "$ADMIN_URL/api/alerts/<ALERT_POLICY_ID>/rename" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "displayName": "renamed-alert-policy"
+  }'
+```
+
+## Local Docker for Monitoring Admin
+
+Run `monitoring-admin` locally (for VS Code/Drone-triggered workflows):
+
+```bash
+docker build -t monitoring-admin-local ./monitoring-admin
+docker run --rm -p 8082:8080 \
+  -e GCP_PROJECT_ID=gcpobservability \
+  -e GOOGLE_APPLICATION_CREDENTIALS=/var/secrets/google/adc.json \
+  -v "$HOME/.config/gcloud/application_default_credentials.json:/var/secrets/google/adc.json:ro" \
+  --name monitoring-admin-local \
+  monitoring-admin-local
+```
+
+Local API examples:
+
+```bash
+curl http://localhost:8082/actuator/health
+curl http://localhost:8082/api/alerts
+curl http://localhost:8082/api/channels
 ```
 
 ## Observability Flow Notes

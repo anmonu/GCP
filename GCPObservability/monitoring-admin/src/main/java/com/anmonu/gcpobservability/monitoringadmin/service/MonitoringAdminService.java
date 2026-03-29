@@ -4,9 +4,11 @@ import com.anmonu.gcpobservability.monitoringadmin.config.MonitoringProperties;
 import com.anmonu.gcpobservability.monitoringadmin.dto.AlertPolicyRequest;
 import com.anmonu.gcpobservability.monitoringadmin.dto.AlertPolicyResponse;
 import com.anmonu.gcpobservability.monitoringadmin.dto.ChannelUpdateRequest;
+import com.anmonu.gcpobservability.monitoringadmin.dto.CopyAlertRequest;
 import com.anmonu.gcpobservability.monitoringadmin.dto.EmailChannelRequest;
 import com.anmonu.gcpobservability.monitoringadmin.dto.NotificationChannelResponse;
 import com.anmonu.gcpobservability.monitoringadmin.dto.PubsubChannelRequest;
+import com.anmonu.gcpobservability.monitoringadmin.dto.RenameAlertRequest;
 import com.google.api.gax.rpc.ApiException;
 import com.google.monitoring.v3.AlertPolicyServiceClient;
 import com.google.monitoring.v3.CreateAlertPolicyRequest;
@@ -26,6 +28,7 @@ import com.google.monitoring.v3.AlertPolicy;
 import com.google.monitoring.v3.AlertPolicy.Condition;
 import com.google.monitoring.v3.NotificationChannel;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.StreamSupport;
 import org.springframework.stereotype.Service;
 
@@ -82,6 +85,56 @@ public class MonitoringAdminService {
             throw new IllegalStateException("Unable to update alert policy: " + ex.getStatusCode().getCode(), ex);
         } catch (Exception ex) {
             throw new IllegalStateException("Unable to update alert policy", ex);
+        }
+    }
+
+    public AlertPolicyResponse copyAlertPolicy(String id, CopyAlertRequest request) {
+        try (AlertPolicyServiceClient client = AlertPolicyServiceClient.create()) {
+            AlertPolicy source = client.getAlertPolicy(normalizeAlertPolicyName(id));
+
+            AlertPolicy.Builder builder = source.toBuilder()
+                    .clearName()
+                    .setDisplayName(request.displayName());
+
+            if (request.enabled() != null) {
+                builder.setEnabled(BoolValue.of(request.enabled()));
+            }
+
+            if (request.documentation() != null && !request.documentation().isBlank()) {
+                builder.setDocumentation(AlertPolicy.Documentation.newBuilder()
+                        .setContent(request.documentation())
+                        .setMimeType("text/markdown")
+                        .build());
+            }
+
+            List<String> channels = mapChannels(source.getNotificationChannelsList(), request.notificationChannelMapping());
+            if (request.notificationChannels() != null && !request.notificationChannels().isEmpty()) {
+                channels = request.notificationChannels();
+            }
+
+            builder.clearNotificationChannels();
+            builder.addAllNotificationChannels(channels);
+
+            AlertPolicy created = client.createAlertPolicy(CreateAlertPolicyRequest.newBuilder()
+                    .setName(ProjectName.of(properties.projectId()).toString())
+                    .setAlertPolicy(builder.build())
+                    .build());
+            return toAlertResponse(created);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Unable to copy alert policy", ex);
+        }
+    }
+
+    public AlertPolicyResponse renameAlertPolicy(String id, RenameAlertRequest request) {
+        try (AlertPolicyServiceClient client = AlertPolicyServiceClient.create()) {
+            AlertPolicy existing = client.getAlertPolicy(normalizeAlertPolicyName(id));
+            AlertPolicy updated = client.updateAlertPolicy(UpdateAlertPolicyRequest.newBuilder()
+                    .setAlertPolicy(existing.toBuilder().setDisplayName(request.displayName()).build())
+                    .setUpdateMask(FieldMask.newBuilder().addPaths("display_name").build())
+                    .build());
+            return toAlertResponse(updated);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Unable to rename alert policy", ex);
         }
     }
 
@@ -169,6 +222,15 @@ public class MonitoringAdminService {
         } catch (Exception ex) {
             throw new IllegalStateException("Unable to create notification channel", ex);
         }
+    }
+
+    private List<String> mapChannels(List<String> existingChannels, Map<String, String> channelMapping) {
+        if (channelMapping == null || channelMapping.isEmpty()) {
+            return existingChannels;
+        }
+        return existingChannels.stream()
+                .map(channel -> channelMapping.getOrDefault(channel, channel))
+                .toList();
     }
 
     private AlertPolicy toAlertPolicy(AlertPolicyRequest request, String existingName) {
