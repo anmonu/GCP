@@ -10,20 +10,19 @@ import com.anmonu.gcpobservability.monitoringadmin.dto.NotificationChannelRespon
 import com.anmonu.gcpobservability.monitoringadmin.dto.PubsubChannelRequest;
 import com.anmonu.gcpobservability.monitoringadmin.dto.RenameAlertRequest;
 import com.google.api.gax.rpc.ApiException;
-import com.google.monitoring.v3.AlertPolicyServiceClient;
+import com.google.cloud.monitoring.v3.AlertPolicyServiceClient;
+import com.google.cloud.monitoring.v3.NotificationChannelServiceClient;
 import com.google.monitoring.v3.CreateAlertPolicyRequest;
 import com.google.monitoring.v3.CreateNotificationChannelRequest;
 import com.google.monitoring.v3.ComparisonType;
 import com.google.monitoring.v3.ListAlertPoliciesRequest;
 import com.google.monitoring.v3.ListNotificationChannelsRequest;
-import com.google.monitoring.v3.NotificationChannelServiceClient;
 import com.google.monitoring.v3.ProjectName;
 import com.google.monitoring.v3.UpdateAlertPolicyRequest;
 import com.google.monitoring.v3.UpdateNotificationChannelRequest;
 import com.google.protobuf.BoolValue;
 import com.google.protobuf.Duration;
 import com.google.protobuf.FieldMask;
-import com.google.protobuf.util.FieldMaskUtil;
 import com.google.monitoring.v3.AlertPolicy;
 import com.google.monitoring.v3.AlertPolicy.Condition;
 import com.google.monitoring.v3.NotificationChannel;
@@ -203,7 +202,7 @@ public class MonitoringAdminService {
 
         try (NotificationChannelServiceClient client = NotificationChannelServiceClient.create()) {
             NotificationChannel updated = client.updateNotificationChannel(UpdateNotificationChannelRequest.newBuilder()
-                    .setUpdateMask(FieldMaskUtil.fromStringList(NotificationChannel.class, paths))
+                    .setUpdateMask(FieldMask.newBuilder().addAllPaths(paths).build())
                     .setNotificationChannel(builder.build())
                     .build());
             return toChannelResponse(updated);
