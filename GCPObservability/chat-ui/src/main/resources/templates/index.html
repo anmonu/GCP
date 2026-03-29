@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gemini Prompt UI</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 760px; margin: 24px auto; padding: 0 16px; color: #111827; }
+        h1 { margin-bottom: 4px; }
+        p { margin-top: 0; color: #4b5563; }
+        textarea { width: 100%; min-height: 140px; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; }
+        button { margin-top: 10px; padding: 8px 12px; border: 1px solid #0f766e; background: #0f766e; color: #ffffff; border-radius: 6px; cursor: pointer; }
+        pre { white-space: pre-wrap; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; min-height: 120px; }
+    </style>
+</head>
+<body>
+<h1>Gemini Prompt</h1>
+<p>Calls Vertex AI with your configured model.</p>
+<form method="post" action="/prompt">
+    <label for="prompt">Prompt</label>
+    <textarea id="prompt" name="prompt" th:text="${prompt}"></textarea>
+    <button type="submit">Send</button>
+</form>
+<h2>Response</h2>
+<pre th:text="${response}">Response will appear here.</pre>
+</body>
+</html>

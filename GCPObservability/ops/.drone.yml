@@ -1,0 +1,32 @@
+kind: pipeline
+type: docker
+name: gcp-observability
+
+steps:
+  - name: build-chat-ui
+    image: maven:3.9.9-eclipse-temurin-21
+    commands:
+      - cd chat-ui
+      - mvn -B -DskipTests package
+
+  - name: build-alert-bridge
+    image: maven:3.9.9-eclipse-temurin-21
+    commands:
+      - cd alert-bridge
+      - mvn -B -DskipTests package
+
+  - name: build-monitoring-admin
+    image: maven:3.9.9-eclipse-temurin-21
+    commands:
+      - cd monitoring-admin
+      - mvn -B -DskipTests package
+
+  - name: docker-builds
+    image: plugins/docker
+    settings:
+      repo: gcr.io/${PROJECT_ID}/gcp-observability
+      dockerfile: chat-ui/Dockerfile
+      dry_run: true
+    when:
+      branch:
+        - main

@@ -1,0 +1,15 @@
+title: MonitoringAdminOperator
+description: Permissions to manage alert policies and notification channels
+stage: GA
+includedPermissions:
+  - monitoring.alertPolicies.create
+  - monitoring.alertPolicies.get
+  - monitoring.alertPolicies.list
+  - monitoring.alertPolicies.update
+  - monitoring.notificationChannelDescriptors.get
+  - monitoring.notificationChannelDescriptors.list
+  - monitoring.notificationChannels.create
+  - monitoring.notificationChannels.get
+  - monitoring.notificationChannels.list
+  - monitoring.notificationChannels.update
+  - resourcemanager.projects.get

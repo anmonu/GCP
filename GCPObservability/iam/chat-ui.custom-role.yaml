@@ -1,0 +1,8 @@
+title: ChatUiGeminiCaller
+description: Minimal role for chat-ui service to call Gemini via Vertex AI
+stage: GA
+includedPermissions:
+  - aiplatform.endpoints.predict
+  - aiplatform.locations.get
+  - aiplatform.locations.list
+  - resourcemanager.projects.get
