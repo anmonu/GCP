@@ -3,12 +3,22 @@
 A production-shaped starter monorepo for:
 
 - Prompting **Gemini 2.5 via Vertex AI** from a simple UI (`chat-ui`)
-- Bridging GCP alert notifications from **Pub/Sub push -> Cloud Run** (`alert-bridge`)
+- Bridging GCP alert notifications from **Pub/Sub push -> alert-bridge endpoint** (`alert-bridge`)
 - Managing Monitoring resources through a Java REST API (`monitoring-admin`)
 - Local observability demo with **Elasticsearch + Kibana + Prometheus + Grafana**
 
 This repository avoids Terraform for Pub/Sub + notification channels and uses `gcloud` scripts instead.
-The deployment target is Cloud Run by design (no GKE manifests in this starter).
+No GKE manifests are used in this starter.
+
+## Current Working Mode (March 29, 2026)
+
+The repo now supports a hybrid runtime that was validated end-to-end:
+
+- `chat-ui`: deployed to Cloud Run (public)
+- `alert-bridge`: running locally in Docker on Mac (exposed via Cloudflare tunnel for Pub/Sub push)
+- `monitoring-admin`: running locally in Docker on Mac
+
+This mode is useful for local iteration and Drone-triggered admin workflows without deploying every service to Cloud Run.
 
 ## Architecture Overview
 
@@ -29,7 +39,7 @@ GCP Monitoring Alert Policies
     +--> Pub/Sub Notification Channel -> Pub/Sub Topic -> Push Subscription (OIDC)
                                                         |
                                                         v
-                                          alert-bridge (Cloud Run, private)
+                                    alert-bridge (Local Docker via Tunnel URL)
                                                         |
                                     +-------------------+------------------+
                                     |                                      |
@@ -38,11 +48,12 @@ GCP Monitoring Alert Policies
                                     |                                      |
                                     +--> Prometheus metrics                +--> Kibana
 
-monitoring-admin (Cloud Run, private)
+monitoring-admin (Local Docker)
     |
     v
 Google Cloud Monitoring APIs
   - list/create/update alert policies
+  - copy/rename alert policies
   - list/create/update notification channels
 ```
 
@@ -90,7 +101,7 @@ GCPObservability/
 
 - Spring MVC + Thymeleaf UI
 - `GET /` prompt form
-- `POST /prompt` invokes Gemini via Vertex AI Java SDK
+- `POST /prompt` invokes Gemini via Google Gen AI Java SDK in Vertex AI mode
 - Health + metrics via Actuator (`/actuator/health`, `/actuator/prometheus`)
 
 Required env vars:
@@ -134,12 +145,12 @@ Plus health + metrics via Actuator.
 ## Prerequisites
 
 - Java 21
-- Maven 3.9+
+- Maven 3.8.5+ (3.9+ recommended)
 - Docker + Docker Compose
 - gcloud CLI (authenticated)
 - A GCP project with billing enabled
 
-## Local Development
+## Quickstart (Validated Path)
 
 From repo root:
 
@@ -147,32 +158,101 @@ From repo root:
 cd GCPObservability
 ```
 
-### Run services locally
-
-Terminal 1:
+### 1) Configure environment
 
 ```bash
-cd chat-ui
-export GCP_PROJECT_ID="<your-project-id>"
+export GCP_PROJECT_ID="gcpobservability"
 export GCP_LOCATION="asia-southeast1"
-export GEMINI_MODEL="gemini-2.5-pro"
-mvn spring-boot:run
+export GEMINI_MODEL="gemini-2.5-flash"
 ```
 
-Terminal 2:
+### 2) gcloud authentication
 
 ```bash
-cd alert-bridge
-export ELASTIC_URL="http://localhost:9200"
-mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=8081
+gcloud auth login
+gcloud auth application-default login
+gcloud config set project "$GCP_PROJECT_ID"
 ```
 
-Terminal 3:
+### 3) Create service accounts and custom roles
 
 ```bash
-cd monitoring-admin
-export GCP_PROJECT_ID="<your-project-id>"
-mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=8082
+./scripts/gcloud/create-service-accounts-and-roles.sh "$GCP_PROJECT_ID" "$GCP_LOCATION" alert-bridge
+```
+
+### 4) Deploy chat-ui (Cloud Run, public)
+
+```bash
+gcloud run deploy chat-ui \
+  --project "$GCP_PROJECT_ID" \
+  --region "$GCP_LOCATION" \
+  --source ./chat-ui \
+  --service-account "chat-ui-sa@${GCP_PROJECT_ID}.iam.gserviceaccount.com" \
+  --set-env-vars "GCP_PROJECT_ID=${GCP_PROJECT_ID},GCP_LOCATION=${GCP_LOCATION},GEMINI_MODEL=${GEMINI_MODEL}" \
+  --allow-unauthenticated
+```
+
+### 5) Run alert-bridge locally in Docker
+
+```bash
+docker build -t alert-bridge-local ./alert-bridge
+docker run --rm -p 8081:8080 \
+  -e ELASTIC_URL=http://host.docker.internal:9200 \
+  -e ELASTIC_USERNAME= \
+  -e ELASTIC_PASSWORD= \
+  -e ELASTIC_INDEX_NAME=alert-events \
+  --name alert-bridge-local \
+  alert-bridge-local
+```
+
+Health check:
+
+```bash
+curl http://localhost:8081/actuator/health
+```
+
+### 6) Expose local alert-bridge for Pub/Sub push
+
+```bash
+cloudflared tunnel --url http://localhost:8081
+```
+
+Use the generated URL, e.g. `https://<random>.trycloudflare.com`.
+
+### 7) Create/update observability resources (topic/channels/subscription)
+
+```bash
+./scripts/gcloud/create-observability-resources.sh "$GCP_PROJECT_ID" "$GCP_LOCATION" "<ALERT_EMAIL>" alert-bridge
+```
+
+If you want to directly point subscription to a new tunnel URL:
+
+```bash
+PUBLIC_BASE_URL="https://<random>.trycloudflare.com"
+gcloud pubsub subscriptions update monitoring-alert-push-sub \
+  --project "$GCP_PROJECT_ID" \
+  --push-endpoint "${PUBLIC_BASE_URL}/api/pubsub/alerts" \
+  --push-auth-service-account "pubsub-push-invoker@${GCP_PROJECT_ID}.iam.gserviceaccount.com" \
+  --push-auth-token-audience "${PUBLIC_BASE_URL}"
+```
+
+### 8) Run monitoring-admin locally in Docker
+
+Service account key creation is blocked by org policy in this environment. Use ADC impersonation:
+
+```bash
+gcloud auth application-default login \
+  --impersonate-service-account=monitoring-admin-sa@${GCP_PROJECT_ID}.iam.gserviceaccount.com
+```
+
+```bash
+docker build -t monitoring-admin-local ./monitoring-admin
+docker run --rm -p 8082:8080 \
+  -e GCP_PROJECT_ID="$GCP_PROJECT_ID" \
+  -e GOOGLE_APPLICATION_CREDENTIALS=/var/secrets/google/adc.json \
+  -v "$HOME/.config/gcloud/application_default_credentials.json:/var/secrets/google/adc.json:ro" \
+  --name monitoring-admin-local \
+  monitoring-admin-local
 ```
 
 ### Start optional local observability stack
@@ -218,12 +298,13 @@ Service accounts created by script:
 
 No `roles/owner` or `roles/editor` are granted by the provided scripts.
 Scripts are bash-only and idempotent where practical (create-or-update behavior for key resources).
+`monitoring-admin-sa` is scoped to Monitoring alert-policy/channel operations via custom role.
 
 Pub/Sub authenticated push specifics are in:
 
 - `iam/pubsub-push-notes.md`
 
-## Deploy to Cloud Run
+## Deploy to Cloud Run (Optional Full Cloud Mode)
 
 ### 1) Create IAM roles + service accounts
 
@@ -270,26 +351,24 @@ This creates:
 ./scripts/gcloud/test-end-to-end.sh <PROJECT_ID> [REGION]
 ```
 
-## Monitoring Admin API Examples
+## Monitoring Admin API Examples (Local Docker)
 
-Assume you have a Cloud Run identity token for private service access:
+Base URL:
 
 ```bash
-ADMIN_URL=$(gcloud run services describe monitoring-admin --region <REGION> --format='value(status.url)')
-TOKEN=$(gcloud auth print-identity-token --audiences="$ADMIN_URL")
+ADMIN_URL="http://localhost:8082"
 ```
 
 List alert policies:
 
 ```bash
-curl -H "Authorization: Bearer $TOKEN" "$ADMIN_URL/api/alerts"
+curl "$ADMIN_URL/api/alerts"
 ```
 
 Create alert policy:
 
 ```bash
 curl -X POST "$ADMIN_URL/api/alerts" \
-  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "displayName": "cpu-utilization-demo",
@@ -306,7 +385,6 @@ Create email channel:
 
 ```bash
 curl -X POST "$ADMIN_URL/api/channels/email" \
-  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "displayName": "Ops Email",
@@ -319,7 +397,6 @@ Create Pub/Sub channel:
 
 ```bash
 curl -X POST "$ADMIN_URL/api/channels/pubsub" \
-  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "displayName": "Alert PubSub",
@@ -332,7 +409,6 @@ Copy an existing alert policy to a new one:
 
 ```bash
 curl -X POST "$ADMIN_URL/api/alerts/<ALERT_POLICY_ID>/copy" \
-  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "displayName": "copied-alert-policy",
@@ -345,33 +421,10 @@ Rename an alert policy:
 
 ```bash
 curl -X POST "$ADMIN_URL/api/alerts/<ALERT_POLICY_ID>/rename" \
-  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "displayName": "renamed-alert-policy"
   }'
-```
-
-## Local Docker for Monitoring Admin
-
-Run `monitoring-admin` locally (for VS Code/Drone-triggered workflows):
-
-```bash
-docker build -t monitoring-admin-local ./monitoring-admin
-docker run --rm -p 8082:8080 \
-  -e GCP_PROJECT_ID=gcpobservability \
-  -e GOOGLE_APPLICATION_CREDENTIALS=/var/secrets/google/adc.json \
-  -v "$HOME/.config/gcloud/application_default_credentials.json:/var/secrets/google/adc.json:ro" \
-  --name monitoring-admin-local \
-  monitoring-admin-local
-```
-
-Local API examples:
-
-```bash
-curl http://localhost:8082/actuator/health
-curl http://localhost:8082/api/alerts
-curl http://localhost:8082/api/channels
 ```
 
 ## Observability Flow Notes
@@ -392,6 +445,7 @@ curl http://localhost:8082/api/channels
    - Check subscription push endpoint and audience.
    - Verify `roles/run.invoker` on alert-bridge for `pubsub-push-invoker`.
    - Verify Pub/Sub service agent has `roles/iam.serviceAccountTokenCreator` on `pubsub-push-invoker`.
+   - Ensure the local tunnel process is running and URL matches the current subscription endpoint.
 
 3. Notification channel creation fails:
    - Ensure `gcloud beta` components are installed for monitoring channel commands.
@@ -404,6 +458,11 @@ curl http://localhost:8082/api/channels
 5. Monitoring-admin private API call fails:
    - Use `gcloud auth print-identity-token`.
    - Ensure caller identity can invoke Cloud Run private service.
+
+6. Monitoring-admin local Docker auth fails:
+   - Run ADC login with SA impersonation:
+     `gcloud auth application-default login --impersonate-service-account=monitoring-admin-sa@<PROJECT_ID>.iam.gserviceaccount.com`
+   - Mount ADC JSON into container as documented above.
 
 ## Notes on API/SDK Drift
 
