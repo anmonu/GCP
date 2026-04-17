@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: branching-demo-config
+data:
+  environment: development
+  releaseTrack: baseline
+  imageTag: "v1"
+  owner: platform-team
