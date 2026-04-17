@@ -4,6 +4,6 @@ metadata:
   name: branching-demo-config
 data:
   environment: development
-  releaseTrack: baseline
-  imageTag: "v1"
+  releaseTrack: chain-1
+  imageTag: "chain-1"
   owner: platform-team
